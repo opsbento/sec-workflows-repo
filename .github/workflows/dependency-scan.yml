@@ -1,0 +1,85 @@
+name: Central dependency scan
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: Node.js version used by the application
+        required: true
+        type: string
+      minio_endpoint:
+        description: Public HTTPS S3 API endpoint for MinIO
+        required: true
+        type: string
+      minio_bucket:
+        description: Existing MinIO bucket for SBOM files
+        required: true
+        type: string
+    secrets:
+      minio_access_key:
+        required: true
+      minio_secret_key:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out application
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Resolve pull request dependencies without scripts
+        if: github.event_name == 'pull_request'
+        run: npm install --ignore-scripts
+
+      - name: Resolve main branch dependencies
+        if: github.event_name == 'push'
+        run: npm install
+
+      - name: Generate installed-dependency SBOM
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          path: ./node_modules
+          format: cyclonedx-json
+          output-file: sbom.cdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Block High and Critical vulnerabilities
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+        with:
+          sbom: sbom.cdx.json
+          fail-build: true
+          severity-cutoff: high
+          output-format: table
+          config: /dev/null
+
+      - name: Store dependency SBOM in MinIO
+        if: ${{ !cancelled() && github.event_name == 'push' && hashFiles('sbom.cdx.json') != '' }}
+        env:
+          MINIO_ENDPOINT: ${{ inputs.minio_endpoint }}
+          MINIO_BUCKET: ${{ inputs.minio_bucket }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.minio_access_key }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.minio_secret_key }}
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_EC2_METADATA_DISABLED: 'true'
+        run: |
+          if [[ "$MINIO_ENDPOINT" != https://* || -z "$MINIO_BUCKET" ]]; then
+            echo 'Set MINIO_ENDPOINT to a reachable HTTPS URL and MINIO_BUCKET to an existing bucket.'
+            exit 1
+          fi
+          aws configure set default.s3.addressing_style path
+          SBOM_DATE="$(TZ=Asia/Jakarta date +%F)"
+          REPO_NAME="${GITHUB_REPOSITORY#*/}"
+          aws s3api put-object --endpoint-url "$MINIO_ENDPOINT" --bucket "$MINIO_BUCKET" --key "$SBOM_DATE/$GITHUB_SHA/$REPO_NAME-dependency.cdx.json" --body sbom.cdx.json --content-type application/json
