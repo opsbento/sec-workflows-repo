@@ -61,7 +61,6 @@ jobs:
           fail-build: true
           severity-cutoff: high
           output-format: table
-          config: /dev/null
 
       - name: Build intermediate stage
         run: docker build --target verified --tag draftroom:verified .
@@ -84,7 +83,6 @@ jobs:
           fail-build: true
           severity-cutoff: high
           output-format: table
-          config: /dev/null
 
       - name: Enforce image gate
         if: steps.final_scan.outcome == 'failure' || steps.verified_scan.outcome == 'failure'
