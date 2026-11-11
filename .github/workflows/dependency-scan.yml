@@ -63,7 +63,6 @@ jobs:
           fail-build: true
           severity-cutoff: high
           output-format: table
-          config: /dev/null
 
       - name: Store dependency SBOM in MinIO
         if: ${{ !cancelled() && github.event_name == 'push' && hashFiles('sbom.cdx.json') != '' }}
