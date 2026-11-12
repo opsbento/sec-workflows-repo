@@ -15,7 +15,7 @@ on:
 
 jobs:
   deploy:
-    runs-on: self-hosted
+    runs-on: [self-hosted, jagoanhosting-deploy]
     steps:
       - name: Update compose tag and restart
         env:
