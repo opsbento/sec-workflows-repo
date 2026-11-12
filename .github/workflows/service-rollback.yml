@@ -14,8 +14,6 @@ on:
     secrets:
       COMPOSE_FILE_PATH:
         required: true
-      COMPOSE_WORKING_DIR:
-        required: true
 
 jobs:
   rollback:
@@ -25,7 +23,6 @@ jobs:
         env:
           COMPOSE_FILE: ${{ secrets.COMPOSE_FILE_PATH }}
           IMAGE_REPO: ${{ inputs.IMAGE_REPO }}
-          COMPOSE_DIR: ${{ secrets.COMPOSE_WORKING_DIR }}
           TARGET_TAG: ${{ inputs.TARGET_TAG }}
         run: |
           OLD_TAG=$(grep "image: ${IMAGE_REPO}:" "$COMPOSE_FILE" | awk -F':' '{print $NF}')
@@ -34,7 +31,7 @@ jobs:
 
           sed -i "s|image: ${IMAGE_REPO}:.*|image: ${IMAGE_REPO}:${TARGET_TAG}|g" "$COMPOSE_FILE"
           
-          cd "$COMPOSE_DIR" && docker compose up -d
+          docker compose --file "$COMPOSE_FILE" up -d app
           
           sleep 10
           echo "Rollback to version ${TARGET_TAG} completed successfully!"
