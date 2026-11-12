@@ -74,12 +74,13 @@ jobs:
       - name: Build intermediate stage
         env:
           DOCKERFILE: ${{ inputs.dockerfile }}
-        run: docker build --file "$DOCKERFILE" --target verified --tag draftroom:verified .
+          IMAGE_NAME: ${{ inputs.image_name }}
+        run: docker build --file "$DOCKERFILE" --target verified --tag "$IMAGE_NAME:verified-$GITHUB_SHA" .
 
       - name: Generate intermediate-stage SBOM
         uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
         with:
-          image: draftroom:verified
+          image: ${{ inputs.image_name }}:verified-${{ github.sha }}
           format: cyclonedx-json
           output-file: verified-image.cdx.json
           upload-artifact: false

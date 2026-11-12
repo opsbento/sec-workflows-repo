@@ -25,12 +25,12 @@ jobs:
         run: |
           set -euo pipefail
           echo "Deploy runner host: $(hostname)"
-          if [[ "$COMPOSE_DIR" != /opt/draftroom || "$COMPOSE_FILE" != /opt/draftroom/compose.yml ]]; then
-            echo 'Compose path secrets differ from /opt/draftroom and /opt/draftroom/compose.yml.'
+          if [[ -z "$COMPOSE_DIR" || -z "$COMPOSE_FILE" ]]; then
+            echo 'Compose path secrets are missing.'
             exit 1
           fi
           if [[ ! -d "$COMPOSE_DIR" || ! -f "$COMPOSE_FILE" ]]; then
-            echo 'Compose path is correct, but the file is missing on this runner host.'
+            echo 'Compose directory or file does not exist on this runner host.'
             exit 1
           fi
           if ! grep -Fq "image: ${IMAGE_REPO}:" "$COMPOSE_FILE"; then
