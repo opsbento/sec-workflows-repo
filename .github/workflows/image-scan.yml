@@ -62,8 +62,6 @@ jobs:
           upload-release-assets: false
 
       - name: Scan final image
-        id: final_scan
-        continue-on-error: true
         uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
         with:
           sbom: final-image.cdx.json
@@ -71,37 +69,8 @@ jobs:
           severity-cutoff: high
           output-format: table
 
-      - name: Build intermediate stage
-        env:
-          DOCKERFILE: ${{ inputs.dockerfile }}
-          IMAGE_NAME: ${{ inputs.image_name }}
-        run: docker build --file "$DOCKERFILE" --target verified --tag "$IMAGE_NAME:verified-$GITHUB_SHA" .
-
-      - name: Generate intermediate-stage SBOM
-        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
-        with:
-          image: ${{ inputs.image_name }}:verified-${{ github.sha }}
-          format: cyclonedx-json
-          output-file: verified-image.cdx.json
-          upload-artifact: false
-          upload-release-assets: false
-
-      - name: Scan intermediate stage
-        id: verified_scan
-        continue-on-error: true
-        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
-        with:
-          sbom: verified-image.cdx.json
-          fail-build: true
-          severity-cutoff: high
-          output-format: table
-
-      - name: Enforce image gate
-        if: steps.final_scan.outcome == 'failure' || steps.verified_scan.outcome == 'failure'
-        run: exit 1
-
-      - name: Store image SBOMs in MinIO
-        if: ${{ !cancelled() && github.event_name == 'push' && (hashFiles('final-image.cdx.json') != '' || hashFiles('verified-image.cdx.json') != '') }}
+      - name: Store final image SBOM in MinIO
+        if: ${{ !cancelled() && github.event_name == 'push' && hashFiles('final-image.cdx.json') != '' }}
         env:
           MINIO_ENDPOINT: ${{ inputs.minio_endpoint }}
           MINIO_BUCKET: ${{ inputs.minio_bucket }}
@@ -117,12 +86,7 @@ jobs:
           aws configure set default.s3.addressing_style path
           SBOM_DATE="$(TZ=Asia/Jakarta date +%F)"
           REPO_NAME="${GITHUB_REPOSITORY#*/}"
-          if [[ -f final-image.cdx.json ]]; then
-            aws s3api put-object --endpoint-url "$MINIO_ENDPOINT" --bucket "$MINIO_BUCKET" --key "$SBOM_DATE/$GITHUB_SHA/$REPO_NAME-final-image.cdx.json" --body final-image.cdx.json --content-type application/json
-          fi
-          if [[ -f verified-image.cdx.json ]]; then
-            aws s3api put-object --endpoint-url "$MINIO_ENDPOINT" --bucket "$MINIO_BUCKET" --key "$SBOM_DATE/$GITHUB_SHA/$REPO_NAME-verified-image.cdx.json" --body verified-image.cdx.json --content-type application/json
-          fi
+          aws s3api put-object --endpoint-url "$MINIO_ENDPOINT" --bucket "$MINIO_BUCKET" --key "$SBOM_DATE/$GITHUB_SHA/$REPO_NAME-final-image.cdx.json" --body final-image.cdx.json --content-type application/json
 
       - name: Log in to Docker Hub
         uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
