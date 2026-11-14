@@ -23,44 +23,24 @@ jobs:
       group: deploy-${{ github.repository }}
       cancel-in-progress: false
     steps:
-      - name: Update compose tag and restart
+      - name: Deploy scanned image
         env:
           COMPOSE_FILE: ${{ secrets.COMPOSE_FILE_PATH }}
           IMAGE_REPO: ${{ inputs.IMAGE_REPO }}
           IMAGE_TAG: ${{ inputs.IMAGE_TAG }}
         run: |
           set -euo pipefail
-          echo "Deploy runner host: $(hostname)"
-          if [[ -z "$COMPOSE_FILE" ]]; then
-            echo 'COMPOSE_FILE_PATH secret is missing.'
-            exit 1
-          fi
-          if [[ "$COMPOSE_FILE" != /opt/draftroom/compose.yml ]]; then
-            echo 'COMPOSE_FILE_PATH is set, but its value differs from the Compose path confirmed on the host.'
-            exit 1
-          fi
-          if [[ ! -f "$COMPOSE_FILE" ]]; then
-            echo 'The path matches, but the runner process cannot see the Compose file on this host.'
-            exit 1
-          fi
-          if ! grep -Fq "image: ${IMAGE_REPO}:" "$COMPOSE_FILE"; then
-            echo 'The Compose file does not contain the IMAGE_REPO configured in repository variables.'
-            exit 1
-          fi
 
-          OLD_TAG=$(grep "image: ${IMAGE_REPO}:" "$COMPOSE_FILE" | awk -F':' '{print $NF}')
+          [[ -f "$COMPOSE_FILE" && "$IMAGE_REPO" =~ ^[a-z0-9][a-z0-9._/-]*$ ]] || exit 1
+
           NEW_TAG="${IMAGE_TAG:-${GITHUB_SHA::8}}"
-          if [[ ! "$NEW_TAG" =~ ^[0-9a-f]{8}$ ]]; then
-            echo 'IMAGE_TAG must be an eight-character lowercase commit SHA.'
-            exit 1
-          fi
-          
-          echo "Audit History -> Previous Tag: ${OLD_TAG} | New Tag: ${NEW_TAG}"
+          [[ "$NEW_TAG" =~ ^[0-9a-f]{8}$ ]] || exit 1
+
+          OLD_TAG=$(grep -F -m1 "image: ${IMAGE_REPO}:" "$COMPOSE_FILE" | cut -d: -f3)
+          [[ -n "$OLD_TAG" ]] || exit 1
+
+          echo "Deploy: ${OLD_TAG} -> ${NEW_TAG}"
 
           docker pull "${IMAGE_REPO}:${NEW_TAG}"
-          sed -i "s|image: ${IMAGE_REPO}:.*|image: ${IMAGE_REPO}:${NEW_TAG}|g" "$COMPOSE_FILE"
-          
+          sed -i "s|image: ${IMAGE_REPO}:.*|image: ${IMAGE_REPO}:${NEW_TAG}|" "$COMPOSE_FILE"
           docker compose --file "$COMPOSE_FILE" up -d app
-          
-          sleep 10
-          echo "Deployment successfully"
