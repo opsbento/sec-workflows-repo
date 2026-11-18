@@ -1,0 +1,111 @@
+name: Central Trivy and Dependency-Track
+
+on:
+  workflow_call:
+    inputs:
+      dependency_track_url:
+        description: HTTPS base URL of the Dependency-Track API
+        required: true
+        type: string
+      project_name:
+        description: Dependency-Track project name; defaults to repository name
+        required: false
+        type: string
+        default: ''
+      project_version:
+        description: Dependency-Track project version
+        required: false
+        type: string
+        default: main
+      dockerfile:
+        description: Dockerfile used to build the image for scanning
+        required: false
+        type: string
+        default: Dockerfile
+    secrets:
+      dependency_track_api_key:
+        required: true
+
+env:
+  TRIVY_VERSION: v0.76.2
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Scan source and dependencies
+        id: source_scan
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret,misconfig
+          format: table
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+          version: ${{ env.TRIVY_VERSION }}
+
+      - name: Generate CycloneDX SBOM
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: cyclonedx
+          output: sbom.cdx.json
+          exit-code: '0'
+          version: ${{ env.TRIVY_VERSION }}
+
+      - name: Build image for scan
+        env:
+          DOCKERFILE: ${{ inputs.dockerfile }}
+        run: |
+          set -euo pipefail
+          IMAGE_REF="dtrack-scan:${GITHUB_SHA:0:7}"
+          docker build --file "$DOCKERFILE" --tag "$IMAGE_REF" .
+          echo "IMAGE_REF=$IMAGE_REF" >> "$GITHUB_ENV"
+
+      - name: Scan built image
+        id: image_scan
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: ${{ env.IMAGE_REF }}
+          scanners: vuln
+          format: table
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+          version: ${{ env.TRIVY_VERSION }}
+
+      - name: Upload SBOM on push
+        if: github.event_name == 'push'
+        env:
+          DTRACK_URL: ${{ inputs.dependency_track_url }}
+          DTRACK_API_KEY: ${{ secrets.dependency_track_api_key }}
+          PROJECT_NAME: ${{ inputs.project_name }}
+          PROJECT_VERSION: ${{ inputs.project_version }}
+        run: |
+          set -euo pipefail
+          [[ "$DTRACK_URL" == https://* && -n "$DTRACK_API_KEY" ]] || exit 1
+          PROJECT_NAME="${PROJECT_NAME:-${GITHUB_REPOSITORY#*/}}"
+          curl --fail-with-body --show-error --silent --retry 3 \
+            -H "X-Api-Key: ${DTRACK_API_KEY}" \
+            -F "projectName=${PROJECT_NAME}" \
+            -F "projectVersion=${PROJECT_VERSION}" \
+            -F 'autoCreate=true' \
+            -F 'bom=@sbom.cdx.json;type=application/json' \
+            "${DTRACK_URL%/}/api/v1/bom"
+
+      - name: Fail on high or critical findings
+        if: steps.source_scan.outcome == 'failure' || steps.image_scan.outcome == 'failure'
+        run: exit 1
