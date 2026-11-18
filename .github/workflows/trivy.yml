@@ -36,7 +36,7 @@ jobs:
   scan:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
-    # Meneruskan secret ke tingkat job env agar terbaca oleh semua steps di bawahnya dengan aman
+    # Mengikat secret agar aman diakses oleh semua steps di dalam job ini
     env:
       DTRACK_API_KEY: ${{ secrets.dependency_track_api_key }}
     steps:
@@ -44,6 +44,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - name: Remove lockfile if exists (Force package.json only)
+        run: rm -f package-lock.json yarn.lock pnpm-lock.yaml
 
       - name: Scan source and dependencies
         id: source_scan
@@ -58,16 +61,6 @@ jobs:
           exit-code: '1'
           version: ${{ env.TRIVY_VERSION }}
 
-      - name: Generate CycloneDX SBOM from Built Image
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          scan-type: image
-          image-ref: ${{ env.IMAGE_REF }}
-          format: cyclonedx
-          output: sbom.cdx.json
-          exit-code: '0'
-          version: ${{ env.TRIVY_VERSION }}
-
       - name: Build image for scan
         env:
           DOCKERFILE: ${{ inputs.dockerfile }}
@@ -76,6 +69,16 @@ jobs:
           IMAGE_REF="dtrack-scan:${GITHUB_SHA:0:7}"
           docker build --file "$DOCKERFILE" --tag "$IMAGE_REF" .
           echo "IMAGE_REF=$IMAGE_REF" >> "$GITHUB_ENV"
+
+      - name: Generate CycloneDX SBOM from Image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: ${{ env.IMAGE_REF }}
+          format: cyclonedx
+          output: sbom.cdx.json
+          exit-code: '0'
+          version: ${{ env.TRIVY_VERSION }}
 
       - name: Scan built image
         id: image_scan
