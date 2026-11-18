@@ -36,6 +36,9 @@ jobs:
   scan:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    # Meneruskan secret ke tingkat job env agar terbaca oleh semua steps di bawahnya dengan aman
+    env:
+      DTRACK_API_KEY: ${{ secrets.dependency_track_api_key }}
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -91,7 +94,6 @@ jobs:
         if: github.event_name == 'push'
         env:
           DTRACK_URL: ${{ inputs.dependency_track_url }}
-          DTRACK_API_KEY: ${{ secrets.dependency_track_api_key }}
           PROJECT_NAME: ${{ inputs.project_name }}
           PROJECT_VERSION: ${{ inputs.project_version }}
         run: |
