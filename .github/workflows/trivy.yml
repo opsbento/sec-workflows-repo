@@ -36,29 +36,22 @@ jobs:
   scan:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
-    # Mengikat secret agar aman diakses oleh semua steps di dalam job ini
-    env:
-      DTRACK_API_KEY: ${{ secrets.dependency_track_api_key }}
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - name: Remove lockfile if exists (Force package.json only)
-        run: rm -f package-lock.json yarn.lock pnpm-lock.yaml
-
-      - name: Scan source and dependencies
-        id: source_scan
-        continue-on-error: true
+      - name: Scan source for secrets and misconfigurations
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: fs
           scan-ref: .
-          scanners: vuln,secret,misconfig
+          scanners: secret,misconfig
           format: table
           severity: HIGH,CRITICAL
           exit-code: '1'
+          cache: 'false'
           version: ${{ env.TRIVY_VERSION }}
 
       - name: Build image for scan
@@ -70,19 +63,7 @@ jobs:
           docker build --file "$DOCKERFILE" --tag "$IMAGE_REF" .
           echo "IMAGE_REF=$IMAGE_REF" >> "$GITHUB_ENV"
 
-      - name: Generate CycloneDX SBOM from Image
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          scan-type: image
-          image-ref: ${{ env.IMAGE_REF }}
-          format: cyclonedx
-          output: sbom.cdx.json
-          exit-code: '0'
-          version: ${{ env.TRIVY_VERSION }}
-
       - name: Scan built image
-        id: image_scan
-        continue-on-error: true
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: image
@@ -91,11 +72,27 @@ jobs:
           format: table
           severity: HIGH,CRITICAL
           exit-code: '1'
+          cache: 'true'
+          skip-setup-trivy: 'true'
+          version: ${{ env.TRIVY_VERSION }}
+
+      - name: Generate CycloneDX SBOM from image
+        if: github.event_name == 'push'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: ${{ env.IMAGE_REF }}
+          format: cyclonedx
+          output: sbom.cdx.json
+          exit-code: '0'
+          cache: 'true'
+          skip-setup-trivy: 'true'
           version: ${{ env.TRIVY_VERSION }}
 
       - name: Upload SBOM on push
         if: github.event_name == 'push'
         env:
+          DTRACK_API_KEY: ${{ secrets.dependency_track_api_key }}
           DTRACK_URL: ${{ inputs.dependency_track_url }}
           PROJECT_NAME: ${{ inputs.project_name }}
           PROJECT_VERSION: ${{ inputs.project_version }}
@@ -113,7 +110,3 @@ jobs:
             "${DTRACK_URL%/}/api/v1/bom"
             
           echo "SBOM successfully uploaded to Dependency-Track."
-
-      - name: Fail on high or critical findings
-        if: steps.source_scan.outcome == 'failure' || steps.image_scan.outcome == 'failure'
-        run: exit 1
