@@ -43,6 +43,8 @@ jobs:
           persist-credentials: false
 
       - name: Scan source for secrets and misconfigurations
+        id: source_scan
+        continue-on-error: true
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: fs
@@ -64,6 +66,8 @@ jobs:
           echo "IMAGE_REF=$IMAGE_REF" >> "$GITHUB_ENV"
 
       - name: Scan built image
+        id: image_scan
+        continue-on-error: true
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: image
@@ -110,3 +114,9 @@ jobs:
             "${DTRACK_URL%/}/api/v1/bom"
             
           echo "SBOM successfully uploaded to Dependency-Track."
+
+      - name: Fail on high or critical findings
+        if: steps.source_scan.outcome == 'failure' || steps.image_scan.outcome == 'failure'
+        run: |
+          echo 'Trivy found HIGH/CRITICAL findings or a scan error. Review the source and image scan logs.' >&2
+          exit 1
